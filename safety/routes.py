@@ -4,6 +4,7 @@ from flask import render_template, Response, request, jsonify, current_app
 from werkzeug.utils import secure_filename
 from . import ai_bp
 from .model import AIModel
+from . import database 
 
 # 초기 모델 설정 (기본값: Nano)
 current_model = 'yolov8n-pose.pt'
@@ -50,6 +51,30 @@ def get_upload_folder():
 @ai_bp.route('/')
 def dashboard():
     return render_template('dashboard.html')
+
+# 통계 페이지
+@ai_bp.route('/stats')
+def stats():
+    return render_template('stats.html')
+
+# [수정] 통계 데이터 API (소스별 차트 데이터 추가)
+@ai_bp.route('/api/stats')
+def get_stats():
+    days = request.args.get('days', default=7, type=int)
+    source = request.args.get('source', default='all', type=str)
+    
+    chart_data = database.get_stats_by_date(days=days, source_filter=source)
+    source_chart_data = database.get_stats_by_source(days=days) # 추가
+    
+    logs = database.get_all_logs(limit=50, source_filter=source)
+    sources = database.get_source_list() 
+    
+    return jsonify({
+        'chart': chart_data, 
+        'source_chart': source_chart_data, # 추가
+        'logs': logs, 
+        'sources': sources
+    })
 
 # 모델 변경 요청 처리 (POST)
 @ai_bp.route('/model_update', methods=['POST'])
@@ -105,10 +130,10 @@ def change_source():
                 source_config.get('reach_enabled', False),
                 source_config.get('fall_enabled', False)
             )
-            # [수정] 화면 표시 설정 적용 (인자 3개)
+            # 화면 표시 설정 적용
             ai_system.detector.update_display_config(
                 source_config.get('draw_objects', True),
-                source_config.get('draw_zones', True), # 추가
+                source_config.get('draw_zones', True),
                 source_config.get('show_only_alert', False)
             )
             
@@ -117,7 +142,6 @@ def change_source():
             # 초기화
             ai_system.set_zones([], 0)
             ai_system.set_detect_config(0.5, 0, 0, False, False)
-            # [수정] 초기화 시에도 인자 3개 전달
             ai_system.detector.update_display_config(True, True, False)
             return jsonify({'status': 'success', 'source': source, 'config': None})
 
@@ -236,13 +260,13 @@ def update_detect_config():
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
-# [수정] 화면 표시 설정 업데이트 (인자 3개)
+# 화면 표시 설정 업데이트
 @ai_bp.route('/update_display_config', methods=['POST'])
 def update_display_config():
     data = request.get_json()
     try:
         draw_objects = data.get('draw_objects', True)
-        draw_zones = data.get('draw_zones', True) # 추가
+        draw_zones = data.get('draw_zones', True)
         show_only_alert = data.get('show_only_alert', False)
         
         ai_system.detector.update_display_config(draw_objects, draw_zones, show_only_alert)

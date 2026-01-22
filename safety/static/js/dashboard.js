@@ -127,7 +127,7 @@ function setupEventListeners() {
     if (drawObjectsCheck) {
         drawObjectsCheck.addEventListener('change', saveDisplayConfigToServer);
     }
-    const drawZonesCheck = document.getElementById('drawZonesCheck'); // 추가
+    const drawZonesCheck = document.getElementById('drawZonesCheck'); 
     if (drawZonesCheck) {
         drawZonesCheck.addEventListener('change', saveDisplayConfigToServer);
     }
@@ -154,11 +154,12 @@ function setupEventListeners() {
                 canvas.style.pointerEvents = 'auto';
                 canvas.style.cursor = 'crosshair';
                 resizeCanvas();
+                drawAllZones(); // 그리기 모드 켜면 캔버스에 그림
             } else {
                 canvas.style.pointerEvents = 'none';
                 canvas.style.cursor = 'default';
                 currentPoints = [];
-                drawAllZones();
+                drawAllZones(); // 그리기 모드 끄면 캔버스 지움 (백엔드 영상만 보임)
             }
         });
     }
@@ -258,6 +259,9 @@ window.deleteZone = function(id) {
 function drawAllZones() {
     if (!ctx) return;
     ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    // [수정] 그리기 모드일 때만 캔버스에 그림 (평소엔 백엔드 영상의 선만 봄)
+    if (!drawMode) return;
 
     zones.forEach(zone => {
         drawSingleZone(zone.points, true); 

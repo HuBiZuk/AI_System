@@ -16,6 +16,27 @@
         <a class="navbar-brand" href="/">
             <i class="fas fa-shield-alt me-2"></i>AI Safety System
         </a>
+
+        <!-- 모바일용 토글 버튼 -->
+        <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+            <span class="navbar-toggler-icon"></span>
+        </button>
+
+        <!-- 메뉴 링크 -->
+        <div class="collapse navbar-collapse" id="navbarNav">
+            <ul class="navbar-nav ms-auto">
+                <li class="nav-item">
+                    <a class="nav-link" href="{{ url_for('ai_safety.dashboard') }}">
+                        <i class="fas fa-tachometer-alt me-1"></i> 대시보드
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link" href="{{ url_for('ai_safety.stats') }}">
+                        <i class="fas fa-chart-bar me-1"></i> 통계
+                    </a>
+                </li>
+            </ul>
+        </div>
     </div>
 </nav>
 

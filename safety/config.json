@@ -27,12 +27,15 @@
         "expand_ratio": 0.79,
         "conf": 0.7,
         "canvas_size": [
-            1549,
-            777
+            1572,
+            809
         ],
         "height_limit": 29,
         "elbow_angle": 108,
-        "reach_enabled": true
+        "reach_enabled": true,
+        "draw_objects": true,
+        "draw_zones": true,
+        "show_only_alert": true
     },
     "2._dangertest2.mp4": {
         "zones": [
@@ -67,7 +70,10 @@
         ],
         "height_limit": 30,
         "elbow_angle": 108,
-        "reach_enabled": true
+        "reach_enabled": true,
+        "draw_objects": true,
+        "draw_zones": false,
+        "show_only_alert": true
     },
     "CCTV1.mp4": {
         "zones": [
@@ -95,17 +101,17 @@
             }
         ],
         "expand_ratio": 0.5,
-        "conf": 0.8,
+        "conf": 0.7,
         "canvas_size": [
             1549,
             777
         ],
         "height_limit": 25,
-        "elbow_angle": 130,
+        "elbow_angle": 140,
         "reach_enabled": true,
         "fall_enabled": false,
         "draw_objects": true,
-        "show_only_alert": true,
+        "show_only_alert": false,
         "draw_zones": true
     },
     "3._dangertest3.mp4": {
@@ -137,7 +143,10 @@
         "canvas_size": [
             1549,
             777
-        ]
+        ],
+        "draw_objects": true,
+        "draw_zones": true,
+        "show_only_alert": true
     },
     "CCTV2.mp4": {
         "zones": [
@@ -174,7 +183,8 @@
         "elbow_angle": 90,
         "reach_enabled": true,
         "draw_objects": true,
-        "show_only_alert": true
+        "show_only_alert": true,
+        "draw_zones": true
     },
     "CCTV3.mp4": {
         "zones": [
@@ -212,7 +222,8 @@
         "reach_enabled": true,
         "fall_enabled": false,
         "draw_objects": true,
-        "show_only_alert": true
+        "show_only_alert": true,
+        "draw_zones": true
     },
     "7._veryDangerTest.mp4": {
         "conf": 0.25,
@@ -220,5 +231,12 @@
         "elbow_angle": 134,
         "reach_enabled": true,
         "fall_enabled": true
+    },
+    "webcam": {
+        "conf": 0.7,
+        "height_limit": 25,
+        "elbow_angle": 130,
+        "reach_enabled": true,
+        "fall_enabled": false
     }
 }

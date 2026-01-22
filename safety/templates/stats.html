@@ -1,0 +1,197 @@
+{% extends "base.html" %}
+
+{% block title %}통계 및 로그 조회{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h4><i class="fas fa-chart-bar me-2"></i> 통계 및 로그 조회</h4>
+
+        <!-- [추가] 필터링 컨트롤 -->
+        <div class="d-flex gap-2">
+            <select class="form-select form-select-sm" id="daysFilter" style="width: 150px;">
+                <option value="7" selected>최근 7일</option>
+                <option value="30">최근 30일</option>
+                <option value="90">최근 3개월</option>
+            </select>
+            <select class="form-select form-select-sm" id="sourceFilter" style="width: 200px;">
+                <option value="all" selected>모든 소스</option>
+                <!-- 자바스크립트로 소스 목록이 채워짐 -->
+            </select>
+            <button class="btn btn-sm btn-primary" onclick="loadStats()">
+                <i class="fas fa-search"></i> 조회
+            </button>
+        </div>
+    </div>
+
+    <div class="row">
+        <!-- [좌측] 주간 위험 감지 차트 -->
+        <div class="col-lg-6 mb-4">
+            <div class="card shadow h-100">
+                <div class="card-header bg-white">
+                    <h6 class="m-0 font-weight-bold text-primary">위험 감지 추이</h6>
+                </div>
+                <div class="card-body">
+                    <canvas id="dangerChart"></canvas>
+                </div>
+            </div>
+        </div>
+
+        <!-- [우측] 최근 로그 목록 -->
+        <div class="col-lg-6 mb-4">
+            <div class="card shadow h-100">
+                <div class="card-header bg-white d-flex justify-content-between align-items-center">
+                    <h6 class="m-0 font-weight-bold text-primary">로그 목록 (최근 50건)</h6>
+                    <button class="btn btn-sm btn-outline-secondary" onclick="loadStats()">
+                        <i class="fas fa-sync-alt"></i> 새로고침
+                    </button>
+                </div>
+                <div class="card-body p-0">
+                    <div class="table-responsive" style="max-height: 400px; overflow-y: auto;">
+                        <table class="table table-hover table-striped mb-0 small">
+                            <thead class="table-light sticky-top">
+                                <tr>
+                                    <th>시간</th>
+                                    <th>레벨</th>
+                                    <th>내용</th>
+                                    <th>소스</th>
+                                </tr>
+                            </thead>
+                            <tbody id="logTableBody">
+                                <!-- 자바스크립트로 데이터가 채워짐 -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Chart.js 라이브러리 로드 -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+<script>
+    let myChart = null;
+
+    // 페이지 로드 시 데이터 가져오기
+    document.addEventListener('DOMContentLoaded', function() {
+        loadStats();
+
+        // 필터 변경 시 자동 조회 (선택 사항)
+        document.getElementById('daysFilter').addEventListener('change', loadStats);
+        document.getElementById('sourceFilter').addEventListener('change', loadStats);
+    });
+
+    function loadStats() {
+        const days = document.getElementById('daysFilter').value;
+        const source = document.getElementById('sourceFilter').value;
+
+        // 쿼리 스트링 생성
+        const url = `/api/stats?days=${days}&source=${encodeURIComponent(source)}`;
+
+        fetch(url)
+        .then(response => response.json())
+        .then(data => {
+            // 키 이름 호환성 처리
+            const chartData = data.chart || data.chart_data;
+
+            if (chartData) {
+                updateChart(chartData);
+            }
+
+            if (data.logs) {
+                updateLogTable(data.logs);
+            }
+
+            // 소스 목록 업데이트 (처음 한 번만 하거나, 필요 시 매번)
+            if (data.sources) {
+                updateSourceFilter(data.sources);
+            }
+        })
+        .catch(error => console.error('통계 로드 오류:', error));
+    }
+
+    // 소스 필터 옵션 업데이트
+    function updateSourceFilter(sources) {
+        const select = document.getElementById('sourceFilter');
+        const currentValue = select.value;
+
+        // 기존 옵션 유지하면서 새로운 소스 추가 (중복 방지 로직 필요하지만 간단하게 처리)
+        // 여기서는 'all' 옵션만 남기고 다시 채우는 방식으로 구현
+        // 단, 사용자가 선택 중인 값은 유지해야 함
+
+        // 이미 목록이 채워져 있다면(옵션이 1개 초과) 업데이트 안 함 (간단한 처리)
+        if (select.options.length > 1) return;
+
+        sources.forEach(src => {
+            const option = document.createElement('option');
+            option.value = src;
+            option.text = src;
+            select.add(option);
+        });
+
+        // 값 복원 (만약 목록에 있다면)
+        select.value = currentValue;
+    }
+
+    // 차트 그리기 함수
+    function updateChart(chartData) {
+        const ctx = document.getElementById('dangerChart').getContext('2d');
+
+        if (myChart) {
+            myChart.destroy();
+        }
+
+        myChart = new Chart(ctx, {
+            type: 'bar',
+            data: {
+                labels: chartData.labels,
+                datasets: [{
+                    label: '위험 감지 횟수',
+                    data: chartData.data,
+                    backgroundColor: 'rgba(255, 99, 132, 0.5)',
+                    borderColor: 'rgba(255, 99, 132, 1)',
+                    borderWidth: 1
+                }]
+            },
+            options: {
+                responsive: true,
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        ticks: { stepSize: 1 }
+                    }
+                }
+            }
+        });
+    }
+
+    // 로그 테이블 업데이트 함수
+    function updateLogTable(logs) {
+        const tbody = document.getElementById('logTableBody');
+        tbody.innerHTML = '';
+
+        if (logs.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="4" class="text-center text-muted">로그가 없습니다.</td></tr>';
+            return;
+        }
+
+        logs.forEach(log => {
+            const row = document.createElement('tr');
+
+            let badgeClass = 'bg-secondary';
+            if (log.level === 'danger') badgeClass = 'bg-danger';
+            if (log.level === 'warning') badgeClass = 'bg-warning text-dark';
+
+            row.innerHTML = `
+                <td>${log.timestamp}</td>
+                <td><span class="badge ${badgeClass}">${log.level.toUpperCase()}</span></td>
+                <td>${log.message}</td>
+                <td>${log.source}</td>
+            `;
+            tbody.appendChild(row);
+        });
+    }
+</script>
+{% endblock %}

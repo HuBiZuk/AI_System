@@ -3,6 +3,7 @@ import numpy as np
 import math
 import time
 from datetime import datetime
+from . import database # DB 모듈 임포트
 
 class SafetyDetector:
     def __init__(self):
@@ -20,12 +21,34 @@ class SafetyDetector:
         
         # 화면 표시 설정
         self.draw_objects = True 
-        self.draw_zones = True # [추가] 구역 그리기 (기본값: 켜짐)
+        self.draw_zones = True 
         self.show_only_alert = False 
         
         # 로그 관리
         self.logs = [] 
         self.last_log_time = 0 
+        self.current_source = 'webcam' # 현재 영상 소스
+        
+        # 스켈레톤 연결 정보
+        self.skeleton_links = [
+            (5, 7), (7, 9),       # 왼팔
+            (6, 8), (8, 10),      # 오른팔
+            (5, 6),               # 어깨
+            (5, 11), (6, 12),     # 몸통
+            (11, 12),             # 골반
+            (11, 13), (13, 15),   # 왼다리
+            (12, 14), (14, 16)    # 오른다리
+        ]
+        # 스타일 설정
+        self.kpt_color_normal = (0, 255, 0) 
+        self.kpt_color_warning = (0, 255, 255) 
+        self.kpt_color_danger = (0, 0, 255) 
+        
+        self.limb_color = (255, 50, 50) 
+        
+        self.box_color_normal = (0, 255, 0) 
+        self.box_color_warning = (0, 255, 255) 
+        self.box_color_danger = (0, 0, 255) 
 
     def update_config(self, conf, height_limit, elbow_angle, reach_enabled, fall_enabled):
         self.conf = float(conf)
@@ -34,7 +57,6 @@ class SafetyDetector:
         self.reach_enabled = bool(reach_enabled)
         self.fall_enabled = bool(fall_enabled)
 
-    # [수정] 화면 표시 설정 업데이트
     def update_display_config(self, draw_objects, draw_zones, show_only_alert):
         self.draw_objects = bool(draw_objects)
         self.draw_zones = bool(draw_zones)
@@ -44,6 +66,10 @@ class SafetyDetector:
         self.zones = zones
         self.expand_ratio = float(expand_ratio)
         self.canvas_size = canvas_size
+        
+    # [추가] 소스 정보 업데이트
+    def set_source(self, source):
+        self.current_source = source
 
     def calculate_angle(self, a, b, c):
         radians = np.arctan2(c[1]-b[1], c[0]-b[0]) - np.arctan2(a[1]-b[1], a[0]-b[0])
@@ -68,6 +94,8 @@ class SafetyDetector:
             return
 
         timestamp = datetime.now().strftime("%H:%M:%S")
+        
+        # 메모리 로그 (화면 표시용)
         log_entry = {
             'time': timestamp,
             'level': level, 
@@ -78,9 +106,93 @@ class SafetyDetector:
             self.logs.pop()
         
         self.last_log_time = current_time
+        
+        # [추가] DB 저장
+        database.insert_log(level, message, self.current_source)
 
     def get_logs(self):
         return self.logs
+
+    # 스켈레톤 그리기
+    def draw_skeleton(self, frame, kpts, kpts_status):
+        for p1, p2 in self.skeleton_links:
+            if kpts[p1][2] >= 0.5 and kpts[p2][2] >= 0.5:
+                pt1 = (int(kpts[p1][0]), int(kpts[p1][1]))
+                pt2 = (int(kpts[p2][0]), int(kpts[p2][1]))
+                cv2.line(frame, pt1, pt2, self.limb_color, 2)
+        
+        for i, kp in enumerate(kpts):
+            if kp[2] >= 0.5: 
+                status = kpts_status[i] 
+                
+                color = self.kpt_color_normal
+                radius = 4
+                
+                if status == 2: 
+                    color = self.kpt_color_danger
+                    radius = 8
+                elif status == 1: 
+                    color = self.kpt_color_warning
+                    radius = 6
+                
+                cv2.circle(frame, (int(kp[0]), int(kp[1])), radius, color, -1)
+
+    # 박스 그리기
+    def draw_box(self, frame, box, color, label=None):
+        cv2.rectangle(frame, (int(box[0]), int(box[1])), (int(box[2]), int(box[3])), color, 2)
+        if label:
+            cv2.putText(frame, label, (int(box[0]), int(box[1]) - 10), 
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
+
+    # 최종 그리기 로직
+    def draw_results(self, frame, result, processed_zones, people_draw_data, is_alert):
+        should_draw = True
+        if self.show_only_alert and not is_alert:
+            should_draw = False
+        if not self.draw_objects and not self.draw_zones: 
+            should_draw = False
+
+        if not should_draw:
+            return frame
+
+        if self.draw_zones or is_alert:
+            for zone in processed_zones:
+                cv2.polylines(frame, [zone['red_pts']], True, (0, 0, 255), 2)
+                if zone['yellow_pts'] is not None:
+                    cv2.polylines(frame, [zone['yellow_pts']], True, (0, 255, 255), 2)
+
+        if self.draw_objects:
+            for person in people_draw_data:
+                if self.show_only_alert and not person['is_alert']:
+                    continue
+                
+                box_color = self.box_color_normal
+                if person['is_alert']:
+                    is_danger = any(item['level'] == 'danger' for item in person['items'] if 'level' in item)
+                    box_color = self.box_color_danger if is_danger else self.box_color_warning
+
+                if person['box'] is not None:
+                    self.draw_box(frame, person['box'], box_color)
+                
+                if person['kpts'] is not None:
+                    self.draw_skeleton(frame, person['kpts'], person['kpts_status'])
+
+                for item in person['items']:
+                    if item['type'] == 'fall':
+                        self.draw_box(frame, item['box'], box_color, label="DANGER: FALL DETECTED!")
+                    elif item['type'] == 'line':
+                        cv2.line(frame, item['p1'], item['p2'], (0, 255, 255), 2)
+                    elif item['type'] == 'text':
+                        cv2.putText(frame, item['msg'], item['pos'], cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
+                    elif item['type'] == 'zone_alert':
+                        color = (0, 0, 255) if item['level'] == 'danger' else (0, 255, 255)
+                        thick = 5 if item['level'] == 'danger' else 4
+                        pts = item['zone']['red_pts'] if item['level'] == 'danger' else item['zone']['yellow_pts']
+                        
+                        cv2.polylines(frame, [pts], True, color, thick)
+                        cv2.putText(frame, item['msg'], (50, 100 if item['level']=='danger' else 150), cv2.FONT_HERSHEY_SIMPLEX, 1.2, color, 2)
+        
+        return frame
 
     def process_frame(self, frame, result):
         if result.keypoints is None:
@@ -111,28 +223,27 @@ class SafetyDetector:
         boxes = result.boxes
         keypoints = result.keypoints.data
 
-        # 1. 감지 로직 수행
         is_alert = False
-        draw_list = [] 
+        people_draw_data = []
 
         for i, kpts in enumerate(keypoints):
-            kpts = kpts.cpu().numpy()
+            kpts_cpu = kpts.cpu().numpy()
+            person_alert = False 
+            person_draw_items = [] 
+            kpts_status = [0] * 17 
             
-            # (1) 쓰러짐 감지
-            is_fall = False
             if self.fall_enabled and boxes is not None and len(boxes) > i:
                 box = boxes[i].xyxy[0].cpu().numpy()
                 w = box[2] - box[0]
                 h = box[3] - box[1]
                 if w > h * 1.2:
-                    is_fall = True
+                    person_alert = True
                     is_alert = True
                     self.add_log('danger', "쓰러짐 감지 (Fall Detected)")
-                    draw_list.append({'type': 'fall', 'box': box})
+                    person_draw_items.append({'type': 'fall', 'box': box, 'level': 'danger'})
 
-            # (2) 팔 뻗음 판단
-            shoulders_y = [kpts[i][1] for i in [5, 6] if kpts[i][2] >= 0.1]
-            hips_y = [kpts[i][1] for i in [11, 12] if kpts[i][2] >= 0.1]
+            shoulders_y = [kpts_cpu[i][1] for i in [5, 6] if kpts_cpu[i][2] >= 0.1]
+            hips_y = [kpts_cpu[i][1] for i in [11, 12] if kpts_cpu[i][2] >= 0.1]
 
             height_pass = False
             limit_y = 0
@@ -144,27 +255,25 @@ class SafetyDetector:
                 avg_hip_y = sum(hips_y) / len(hips_y)
                 torso_len = avg_hip_y - avg_shoulder_y
                 limit_y = avg_hip_y - (torso_len * (self.height_limit / 100.0))
-                center_x = int((kpts[5][0] + kpts[6][0] + kpts[11][0] + kpts[12][0]) / 4)
+                center_x = int((kpts_cpu[5][0] + kpts_cpu[6][0] + kpts_cpu[11][0] + kpts_cpu[12][0]) / 4)
                 width = int(torso_len * 0.8)
 
-                if (kpts[9][2] >= self.conf and kpts[9][1] < limit_y) or \
-                   (kpts[10][2] >= self.conf and kpts[10][1] < limit_y):
+                if (kpts_cpu[9][2] >= self.conf and kpts_cpu[9][1] < limit_y) or \
+                   (kpts_cpu[10][2] >= self.conf and kpts_cpu[10][1] < limit_y):
                     height_pass = True
                 
-                # 기준선 정보 저장
                 if self.height_limit > 0:
-                    draw_list.append({'type': 'line', 'p1': (center_x - width, int(limit_y)), 'p2': (center_x + width, int(limit_y))})
+                    person_draw_items.append({'type': 'line', 'p1': (center_x - width, int(limit_y)), 'p2': (center_x + width, int(limit_y))})
 
             angle_pass = False
-            # 각도 정보 저장
-            if kpts[5][2] >= 0.1 and kpts[7][2] >= 0.1 and kpts[9][2] >= 0.1:
-                angle = self.calculate_angle(kpts[5][:2], kpts[7][:2], kpts[9][:2])
-                draw_list.append({'type': 'text', 'msg': f"{int(angle)}", 'pos': (int(kpts[7][0]), int(kpts[7][1]) - 10)})
+            if kpts_cpu[5][2] >= 0.1 and kpts_cpu[7][2] >= 0.1 and kpts_cpu[9][2] >= 0.1:
+                angle = self.calculate_angle(kpts_cpu[5][:2], kpts_cpu[7][:2], kpts_cpu[9][:2])
+                person_draw_items.append({'type': 'text', 'msg': f"{int(angle)}", 'pos': (int(kpts_cpu[7][0]), int(kpts_cpu[7][1]) - 10)})
                 if angle >= self.elbow_angle: angle_pass = True
             
-            if kpts[6][2] >= 0.1 and kpts[8][2] >= 0.1 and kpts[10][2] >= 0.1:
-                angle = self.calculate_angle(kpts[6][:2], kpts[8][:2], kpts[10][:2])
-                draw_list.append({'type': 'text', 'msg': f"{int(angle)}", 'pos': (int(kpts[8][0]), int(kpts[8][1]) - 10)})
+            if kpts_cpu[6][2] >= 0.1 and kpts_cpu[8][2] >= 0.1 and kpts_cpu[10][2] >= 0.1:
+                angle = self.calculate_angle(kpts_cpu[6][:2], kpts_cpu[8][:2], kpts_cpu[10][:2])
+                person_draw_items.append({'type': 'text', 'msg': f"{int(angle)}", 'pos': (int(kpts_cpu[8][0]), int(kpts_cpu[8][1]) - 10)})
                 if angle >= self.elbow_angle: angle_pass = True
 
             is_reaching = True
@@ -174,15 +283,12 @@ class SafetyDetector:
                 if not (cond_h and cond_a):
                     is_reaching = False
 
-            # (3) 구역 침범 검사
             for zone in processed_zones:
-                check_points = []
+                check_indices = []
                 if zone['type'] == 'touch':
-                    if kpts[9][2] >= self.conf: check_points.append(kpts[9][:2])
-                    if kpts[10][2] >= self.conf: check_points.append(kpts[10][:2])
+                    check_indices = [9, 10] 
                 else:
-                    for kp in kpts:
-                        if kp[2] >= self.conf: check_points.append(kp[:2])
+                    check_indices = range(17) 
 
                 if not is_reaching:
                     continue
@@ -190,64 +296,38 @@ class SafetyDetector:
                 red_intrusion = False
                 yellow_intrusion = False
 
-                for kp in check_points:
-                    pt = (int(kp[0]), int(kp[1]))
+                for idx in check_indices:
+                    if kpts_cpu[idx][2] < self.conf: continue
+                    
+                    pt = (int(kpts_cpu[idx][0]), int(kpts_cpu[idx][1]))
+                    
                     if cv2.pointPolygonTest(zone['red_pts'], pt, False) >= 0:
                         red_intrusion = True
-                        break 
-                    if zone['yellow_pts'] is not None:
+                        kpts_status[idx] = max(kpts_status[idx], 2) 
+                    
+                    elif zone['yellow_pts'] is not None:
                         if cv2.pointPolygonTest(zone['yellow_pts'], pt, False) >= 0:
                             yellow_intrusion = True
+                            kpts_status[idx] = max(kpts_status[idx], 1) 
 
                 if red_intrusion:
+                    person_alert = True
                     is_alert = True
                     msg = "DANGER: TOUCH!" if zone['type'] == 'touch' else "DANGER: INTRUSION!"
                     self.add_log('danger', f"Zone 침범 감지 ({msg})")
-                    draw_list.append({'type': 'zone_alert', 'zone': zone, 'level': 'danger', 'msg': msg})
+                    person_draw_items.append({'type': 'zone_alert', 'zone': zone, 'level': 'danger', 'msg': msg})
                 elif yellow_intrusion:
+                    person_alert = True
                     is_alert = True
                     self.add_log('warning', "접근 경고 (Approaching)")
-                    draw_list.append({'type': 'zone_alert', 'zone': zone, 'level': 'warning', 'msg': "WARNING: APPROACHING"})
+                    person_draw_items.append({'type': 'zone_alert', 'zone': zone, 'level': 'warning', 'msg': "WARNING: APPROACHING"})
+            
+            people_draw_data.append({
+                'is_alert': person_alert,
+                'items': person_draw_items,
+                'box': boxes[i].xyxy[0].cpu().numpy() if boxes is not None and len(boxes) > i else None,
+                'kpts': kpts_cpu,
+                'kpts_status': kpts_status
+            })
 
-
-        # 2. 그리기 결정 로직 (수정됨)
-        should_draw = True
-        
-        # '감지 시에만 표시'가 켜져 있고, 감지된 게 없으면 -> 안 그림
-        if self.show_only_alert and not is_alert:
-            should_draw = False
-
-        if should_draw:
-            # YOLO 기본 그림 (스켈레톤/박스) 그리기
-            # draw_objects가 켜져 있을 때만 그림 (위에서 이미 걸러졌지만 명시적으로)
-            if self.draw_objects:
-                frame = result.plot(img=frame)
-
-            # 구역 선 그리기 (draw_zones가 켜져 있을 때만)
-            if self.draw_zones:
-                for zone in processed_zones:
-                    cv2.polylines(frame, [zone['red_pts']], True, (0, 0, 255), 2)
-                    if zone['yellow_pts'] is not None:
-                        cv2.polylines(frame, [zone['yellow_pts']], True, (0, 255, 255), 2)
-
-            # 추가 정보 그리기 (draw_objects가 켜져 있을 때만)
-            if self.draw_objects:
-                for item in draw_list:
-                    if item['type'] == 'fall':
-                        cv2.rectangle(frame, (int(item['box'][0]), int(item['box'][1])), (int(item['box'][2]), int(item['box'][3])), (0, 0, 255), 3)
-                        cv2.putText(frame, "DANGER: FALL DETECTED!", (int(item['box'][0]), int(item['box'][1]) - 10), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 0, 255), 2)
-                    elif item['type'] == 'line':
-                        cv2.line(frame, item['p1'], item['p2'], (0, 255, 255), 2)
-                    elif item['type'] == 'text':
-                        cv2.putText(frame, item['msg'], item['pos'], cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
-                    elif item['type'] == 'zone_alert':
-                        # 경고 시 구역 덧칠 및 메시지
-                        color = (0, 0, 255) if item['level'] == 'danger' else (0, 255, 255)
-                        thick = 5 if item['level'] == 'danger' else 4
-                        pts = item['zone']['red_pts'] if item['level'] == 'danger' else item['zone']['yellow_pts']
-                        
-                        # 경고 시에는 구역 선을 굵게 덧칠 (draw_zones가 꺼져 있어도 경고는 보여야 함)
-                        cv2.polylines(frame, [pts], True, color, thick)
-                        cv2.putText(frame, item['msg'], (50, 100 if item['level']=='danger' else 150), cv2.FONT_HERSHEY_SIMPLEX, 1.2, color, 2)
-
-        return frame
+        return self.draw_results(frame, result, processed_zones, people_draw_data, is_alert)
